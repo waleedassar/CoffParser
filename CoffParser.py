@@ -1,7 +1,9 @@
-import os,sys,time,struct
+import os,sys,time,struct,datetime
 
 ComplexStrings = ["Variable of type ","Pointer to ","Function returning ","Array of "]
 BaseStrings =["NULL","VOID","CHAR","SHORT","INT","LONG","FLOAT","DOUBLE","STRUCT","UNION","ENUM","MOE","BYTE","WORD","UINT","DWORD"]
+ImportTypes = ["IMPORT_CODE","IMPORT_DATA","IMPORT_CONST"]
+NameTypes = ["IMPORT_ORDINAL","IMPORT_NAME","IMPORT_NAME_NOPREFIX","IMPORT_NAME_UNDECORATE"]
 
 
 def IsNull(Str):
@@ -149,44 +151,84 @@ inF = sys.argv[1]
 
 fIn = open(inF,"rb")
 fCon = fIn.read()
+fCon_Len = len(fCon)
+ToBeReadSize = 0x14
+if ToBeReadSize > fCon_Len:
+    print "Input file is too small"
+    sys.exit(-2)
 
-#------------------_IMAGE_FILE_HEADER-----------
+
 ImageFileHeader = fCon[0:0x14]
-Machine = (struct.unpack("H",ImageFileHeader[0:2]))[0]
-print "Machine: " + str(hex(Machine))
-NumberOfSections = (struct.unpack("H",ImageFileHeader[2:4]))[0]
-print "Number Of Sections: " + str(hex(NumberOfSections))
-TimeDateStamp = (struct.unpack("L",ImageFileHeader[4:8]))[0]
-print "TimeDateStamp: " + str(hex(TimeDateStamp))
-PointerToSymbolTable = (struct.unpack("L",ImageFileHeader[8:0xC]))[0]
-print "PointerToSymbolsTable: " + str(hex(PointerToSymbolTable))
-NumberOfSymbols = (struct.unpack("L",ImageFileHeader[0xC:0x10]))[0]
-print "NumberOfSymbols: " + str(hex(NumberOfSymbols))
-SizeOfOptionalHeader = (struct.unpack("H",ImageFileHeader[0x10:0x12]))[0]
-if SizeOfOptionalHeader != 0:
-    print "SizeOfOptionalHeader: " + str(hex(SizeOfOptionalHeader))
-Characteristics = (struct.unpack("H",ImageFileHeader[0x12:0x14]))[0]
-if Characteristics != 0:
-    print "Characteristics: " + str(hex(Characteristics))
+#-------Check if it is an Import Library instead of a typical .Obj --------
+Sig1 = ImageFileHeader[0:2]
+Sig2 = ImageFileHeader[2:4]
 
-print "\r\n\r\n"
-#--------------------------------
+#If Sig1 is IMAGE_FILE_MACHINE_UNKNOWN and Sig2 is 0xFFFF, then it is an Import Library
+if Sig1 == "\x00\x00" and Sig2 == "\xFF\xFF":
+    print "Input file is an Import Library"
+    Version = struct.unpack("H",ImageFileHeader[4:6])[0]
+    print "Version: " + str(hex(Version))
+    Machine = struct.unpack("H",ImageFileHeader[6:8])[0]
+    print "Machine: " + str(hex(Machine))
+    TimeDateStamp = struct.unpack("L",ImageFileHeader[8:12])[0]
+    print "TimeDateStamp: " + str( datetime.datetime.fromtimestamp(int(TimeDateStamp)) )
+    DataSize = struct.unpack("L",ImageFileHeader[12:16])[0]
+    print "Size: " + str(hex(DataSize))
+    Ordinal_Hint = struct.unpack("H",ImageFileHeader[16:18])[0]
+    Bits = struct.unpack("H",ImageFileHeader[18:20])[0]
+    ImportType = Bits & 0x3
+    NameType = (Bits & 0x1C) >> 2
+    Reserved = (Bits & 0xFFE0) >> 5
+    if NameType == 0:
+        print "Ordinal: " + str(hex(Ordinal_Hint))
+    else:
+        print "Hint: " + str(hex(Ordinal_Hint))
+    print "Import Type: " + ImportTypes[ImportType]
+    print "Import Name Type: " + NameTypes[NameType]
 
-
-PtrSymTable = PointerToSymbolTable
-NumSym = NumberOfSymbols
-
-#-------------------------------
-
-StringTableOffset = GetCoffStringTableOffset(PtrSymTable,NumSym)
-StringsSize = GetCoffStringTableSize(fCon,PtrSymTable,NumSym)
-
-StringTable = fCon[StringTableOffset:StringTableOffset+StringsSize]
-
-
-ParseCoff(fCon,PtrSymTable,NumSym,StringTable)
-
-
+    ToBeReadSize += DataSize
+    if ToBeReadSize > fCon_Len:
+        print "Boundary error while reading import name and DLL"
+        sys.exit(-3)
+    Data = fCon[0x14:0x14+DataSize]
+    Name_DLL = Data.split("\x00")
+    if len(Name_DLL) >= 1 and Name_DLL[0]!="":
+        print "Name: " + Name_DLL[0]
+    else:
+        print "Error reading name"
+        sys.exit(-3)
+    if len(Name_DLL) >= 2 and Name_DLL[1]!="":
+        print "DLL: " + Name_DLL[1]
+    else:
+        print "error reading DLL name"
+        sys.exit(-4)
+else:
+    #------------------_IMAGE_FILE_HEADER--------------------------------------
+    Machine = (struct.unpack("H",ImageFileHeader[0:2]))[0]
+    print "Machine: " + str(hex(Machine))
+    NumberOfSections = (struct.unpack("H",ImageFileHeader[2:4]))[0]
+    print "Number Of Sections: " + str(hex(NumberOfSections))
+    TimeDateStamp = (struct.unpack("L",ImageFileHeader[4:8]))[0]
+    print "TimeDateStamp: " + str( datetime.datetime.fromtimestamp(int(TimeDateStamp)) )
+    PointerToSymbolTable = (struct.unpack("L",ImageFileHeader[8:0xC]))[0]
+    print "PointerToSymbolsTable: " + str(hex(PointerToSymbolTable))
+    NumberOfSymbols = (struct.unpack("L",ImageFileHeader[0xC:0x10]))[0]
+    print "NumberOfSymbols: " + str(hex(NumberOfSymbols))
+    SizeOfOptionalHeader = (struct.unpack("H",ImageFileHeader[0x10:0x12]))[0]
+    if SizeOfOptionalHeader != 0:
+        print "SizeOfOptionalHeader: " + str(hex(SizeOfOptionalHeader))
+    Characteristics = (struct.unpack("H",ImageFileHeader[0x12:0x14]))[0]
+    if Characteristics != 0:
+        print "Characteristics: " + str(hex(Characteristics))
+    print "\r\n\r\n"
+    #--------------------------------
+    PtrSymTable = PointerToSymbolTable
+    NumSym = NumberOfSymbols
+    #-------------------------------
+    StringTableOffset = GetCoffStringTableOffset(PtrSymTable,NumSym)
+    StringsSize = GetCoffStringTableSize(fCon,PtrSymTable,NumSym)
+    StringTable = fCon[StringTableOffset:StringTableOffset+StringsSize]
+    ParseCoff(fCon,PtrSymTable,NumSym,StringTable)
 fIn.close()
 
 
