@@ -1,10 +1,23 @@
-import os,sys,time,struct,datetime
+import os,sys,time,struct,datetime,math
+
+
+
+xCharacteristics = ["IMAGE_FILE_RELOCS_STRIPPED","IMAGE_FILE_EXECUTABLE_IMAGE","IMAGE_FILE_LINE_NUMS_STRIPPED","IMAGE_FILE_LOCAL_SYMS_STRIPPED","IMAGE_FILE_AGGRESSIVE_WS_TRIM","IMAGE_FILE_LARGE_ADDRESS_ AWARE","IMAGE_FILE_UNKNOWN","IMAGE_FILE_BYTES_REVERSED_LO","IMAGE_FILE_32BIT_MACHINE","IMAGE_FILE_DEBUG_STRIPPED","IMAGE_FILE_REMOVABLE_RUN_FROM_SWAP","IMAGE_FILE_NET_RUN_FROM_SWAP","IMAGE_FILE_SYSTEM","IMAGE_FILE_DLL","IMAGE_FILE_UP_SYSTEM_ONLY","IMAGE_FILE_BYTES_REVERSED_HI"]
 
 ComplexStrings = ["Variable of type ","Pointer to ","Function returning ","Array of "]
 BaseStrings =["NULL","VOID","CHAR","SHORT","INT","LONG","FLOAT","DOUBLE","STRUCT","UNION","ENUM","MOE","BYTE","WORD","UINT","DWORD"]
 ImportTypes = ["IMPORT_CODE","IMPORT_DATA","IMPORT_CONST"]
 NameTypes = ["IMPORT_ORDINAL","IMPORT_NAME","IMPORT_NAME_NOPREFIX","IMPORT_NAME_UNDECORATE"]
 
+
+def GetCharacteristicsFromInt(IntX):
+    CharStr = ""
+    for i in range(0,32):
+        X = (IntX >> i) & 0x1
+        if X != 0:
+            CharStr += xCharacteristics[i]
+            CharStr += "|"
+    return CharStr.rstrip("|")
 
 def IsNull(Str):
     LenStr = len(Str)
@@ -87,14 +100,16 @@ def ParseCoff(Content,PtrToSymbolTable,NumberOfSymbols,StringTable):
         gNonFunc = False
         #-----------------
         Name = SymTable[0:8]
+        FinalName = ""
         if IsNull(Name[0:4])==True:
             #Long Name ==> Read from "string" table
             NameOffset = struct.unpack("L",Name[4:8])[0]
-            #pass
-            print "Name: " + GetCoffStringFromStringTable(StringTable,NameOffset)
+            FinalName = GetCoffStringFromStringTable(StringTable,NameOffset)
+            print "Name: " + FinalName
         else:
             #Short Name
-            print "Name: " + Name.rstrip("\x00")
+            FinalName = Name.rstrip("\x00")
+            print "Name: " + FinalName
         #-----------------
         Value = SymTable[8:12]
         iValue = struct.unpack("L",Value)[0]
@@ -124,7 +139,11 @@ def ParseCoff(Content,PtrToSymbolTable,NumberOfSymbols,StringTable):
             Descr += BaseStrings[BaseType]
         else:
             Descr += "Unknown Type"
-        print "Type: " + Descr + " (" + str(hex(iType)) + ")"
+        #print "Type: " + Descr + " (" + str(hex(iType)) + ")"
+        if iType == 0x20:
+            print "Type: Function"
+        else:
+            print "Type: Not Function"
         #-------------------
         StorageClass = struct.unpack("B",SymTable[16])[0]
         print "Storage Class: " + GetCoffStorageClass(StorageClass)
@@ -205,6 +224,9 @@ if Sig1 == "\x00\x00" and Sig2 == "\xFF\xFF":
 else:
     #------------------_IMAGE_FILE_HEADER--------------------------------------
     Machine = (struct.unpack("H",ImageFileHeader[0:2]))[0]
+    if Machine != 0x014C and Machine != 0x8664:
+        print "Unsupported Machine Architecture " + str(hex(Machine))
+        sys.exit(-5)
     print "Machine: " + str(hex(Machine))
     NumberOfSections = (struct.unpack("H",ImageFileHeader[2:4]))[0]
     print "Number Of Sections: " + str(hex(NumberOfSections))
@@ -220,6 +242,17 @@ else:
     Characteristics = (struct.unpack("H",ImageFileHeader[0x12:0x14]))[0]
     if Characteristics != 0:
         print "Characteristics: " + str(hex(Characteristics))
+        print GetCharacteristicsFromInt(Characteristics)
+
+    if SizeOfOptionalHeader != 0:
+        OptionalHeader = ""
+        ToBeReadSize += SizeOfOptionalHeader
+        if ToBeReadSize > fCon_Len:
+            print "Boundary error while reading Optional Header"
+            sys.exit(-6)
+        if Machine == 0x014C or Machine == 0x8664:
+            OptionalHeader = fCon[0x14:ToBeReadSize]
+            #print set Optional Header fields here
     print "\r\n\r\n"
     #--------------------------------
     PtrSymTable = PointerToSymbolTable
